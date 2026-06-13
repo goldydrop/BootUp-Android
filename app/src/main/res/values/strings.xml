@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">BootUp</string>
+    <string name="service_description">BootUp Background Interceptor</string>
+</resources>
