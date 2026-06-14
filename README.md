@@ -1,6 +1,6 @@
 # BootUp (Android Port) 📱🖥️
 
-BootUp is a native Android application built with Jetpack Compose that intercepts app launches and displays a highly customizable, retro CRT terminal boot sequence. 
+BootUp (Android port) is a application built with Jetpack Compose that intercepts app launches and displays a highly customizable, retro CRT terminal boot sequence. 
 
 **⚠️ ATTRIBUTION & CREDIT** This project is an unofficial Android port of the original BootUp created by [eliguzz](https://github.com/eliguzz).  
 All credit for the original concept, design, and terminal aesthetic goes to them!  
