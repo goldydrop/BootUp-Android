@@ -1,5 +1,12 @@
 package com.booty.bootup
 
+import androidx.compose.ui.composed
+import android.graphics.RenderEffect
+import android.graphics.RuntimeShader
+import android.os.Build
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.remember
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -24,6 +31,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -54,38 +64,52 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             BootUpTheme {
-                val hasPermission by isPermissionGranted
+                val context = LocalContext.current
+                val targetManager = remember { TargetManager(context) }
 
-                if (!hasPermission) {
-                    PermissionScreen(
-                        onOpenSettings = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                    )
-                } else {
-                    if (interceptedPackage != null) {
-                        val appName = getAppNameFromPackage(this, interceptedPackage)
-                        BootSequenceScreen(targetApp = appName)
+                // Track the shader setting at the highest level so the background instantly updates
+                var isShaderEnabled by remember { mutableStateOf(targetManager.isShaderEnabled()) }
+
+                // Pass the toggle state into the CRT effect
+                Box(modifier = Modifier.fillMaxSize().crtEffect(isShaderEnabled)) {
+                    val hasPermission by isPermissionGranted
+
+                    if (!hasPermission) {
+                        PermissionScreen(
+                            onOpenSettings = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                        )
                     } else {
-                        var isBiosBooting by remember { mutableStateOf(true) }
-                        var currentScreen by remember { mutableStateOf("MAIN_MENU") }
-
-                        if (isBiosBooting) {
-                            BiosBootScreen(onBootComplete = { isBiosBooting = false })
+                        if (interceptedPackage != null) {
+                            val appName = getAppNameFromPackage(this@MainActivity, interceptedPackage)
+                            BootSequenceScreen(targetApp = appName, targetAppPackage = interceptedPackage)
                         } else {
-                            when (currentScreen) {
-                                "MAIN_MENU" -> MainMenuScreen(
-                                    onNavigateToSelector = { currentScreen = "SELECTOR" },
-                                    onNavigateToTimeFrame = { currentScreen = "TIME_FRAME" }
-                                )
-                                "SELECTOR" -> AppSelectorScreen(
-                                    onBack = { currentScreen = "MAIN_MENU" }
-                                )
-                                "TIME_FRAME" -> TimeFrameScreen(
-                                    onBack = { currentScreen = "MAIN_MENU" }
-                                )
+                            var isBiosBooting by remember { mutableStateOf(true) }
+                            var currentScreen by remember { mutableStateOf("MAIN_MENU") }
+
+                            if (isBiosBooting) {
+                                BiosBootScreen(onBootComplete = { isBiosBooting = false })
+                            } else {
+                                when (currentScreen) {
+                                    "MAIN_MENU" -> MainMenuScreen(
+                                        onNavigateToSelector = { currentScreen = "SELECTOR" },
+                                        onNavigateToTimeFrame = { currentScreen = "TIME_FRAME" }
+                                    )
+                                    "SELECTOR" -> AppSelectorScreen(
+                                        onBack = { currentScreen = "MAIN_MENU" }
+                                    )
+                                    "TIME_FRAME" -> TimeFrameScreen(
+                                        onBack = { currentScreen = "MAIN_MENU" },
+                                        isShaderEnabled = isShaderEnabled,
+                                        onToggleShader = {
+                                            isShaderEnabled = !isShaderEnabled
+                                            targetManager.saveShaderEnabled(isShaderEnabled)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
-                }
+                } // End of CRT Box
             }
         }
     }
@@ -107,7 +131,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// --- UPDATED: Dynamic Main Menu with Execute Transition Effect ---
 @Composable
 fun MainMenuScreen(onNavigateToSelector: () -> Unit, onNavigateToTimeFrame: () -> Unit) {
     val retroFont = FontFamily(Font(R.font.vt323))
@@ -121,17 +144,14 @@ fun MainMenuScreen(onNavigateToSelector: () -> Unit, onNavigateToTimeFrame: () -
         label = "Blink"
     )
 
-    // State to track if the user clicked something and what lines to dump
     var selectedChoice by remember { mutableStateOf<String?>(null) }
     var transitionLines by remember { mutableStateOf(listOf<String>()) }
     val listState = rememberLazyListState()
 
-    // When a choice is made, run the text dump animation!
     LaunchedEffect(selectedChoice) {
         if (selectedChoice != null) {
-            delay(300) // Small pause after typing the number
+            delay(300)
 
-            // Fire the rapid text dump
             val rapidLinesCount = 35
             for (i in 1..rapidLinesCount) {
                 val hexAddress = "0x" + (100000..999999).random().toString(16).uppercase()
@@ -142,26 +162,22 @@ fun MainMenuScreen(onNavigateToSelector: () -> Unit, onNavigateToTimeFrame: () -
                 transitionLines = transitionLines + rapidLine
             }
 
-            // Dramatic hard stop
             delay(200)
             transitionLines = transitionLines + " "
             transitionLines = transitionLines + "> redirecting mainframe stream... [DONE]"
 
-            delay(700) // Final hold before changing screens
+            delay(700)
 
-            // Execute the actual navigation
             if (selectedChoice == "1") onNavigateToSelector() else onNavigateToTimeFrame()
         }
     }
 
-    // Auto-scroll effect: keeps the camera at the bottom of the dump
     LaunchedEffect(transitionLines.size) {
         if (transitionLines.isNotEmpty()) {
             listState.scrollToItem(transitionLines.size)
         }
     }
 
-    // We swapped Column for LazyColumn so it can scroll down!
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize().background(darkBackground).padding(24.dp)) {
         item {
             Spacer(modifier = Modifier.height(32.dp))
@@ -171,13 +187,12 @@ fun MainMenuScreen(onNavigateToSelector: () -> Unit, onNavigateToTimeFrame: () -
             Text("------------------------------------------------", color = brightGreen, fontSize = 18.sp, fontFamily = retroFont)
             Spacer(modifier = Modifier.height(40.dp))
 
-            // Only allow clicks if selectedChoice is currently null!
             Row(modifier = Modifier.fillMaxWidth().clickable { if (selectedChoice == null) selectedChoice = "1" }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("[1] TARGET APPLICATION SELECTOR", color = brightGreen, fontSize = 24.sp, fontFamily = retroFont)
             }
 
             Row(modifier = Modifier.fillMaxWidth().clickable { if (selectedChoice == null) selectedChoice = "2" }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("[2] TIME FRAME CONFIGURATION", color = brightGreen, fontSize = 24.sp, fontFamily = retroFont)
+                Text("[2] SYSTEM CONFIGURATION", color = brightGreen, fontSize = 24.sp, fontFamily = retroFont)
             }
 
             Spacer(modifier = Modifier.height(48.dp))
@@ -188,17 +203,14 @@ fun MainMenuScreen(onNavigateToSelector: () -> Unit, onNavigateToTimeFrame: () -
                 Text("ENTER CHOICE [1-2]: ", color = brightGreen, fontSize = 24.sp, fontFamily = retroFont)
 
                 if (selectedChoice != null) {
-                    // Show their typed number!
                     Text(selectedChoice!!, color = brightGreen, fontSize = 24.sp, fontFamily = retroFont)
                 } else {
-                    // Show blinking cursor!
                     Text("█", color = brightGreen.copy(alpha = if (cursorAlpha > 0.5f) 1f else 0f), fontSize = 24.sp, fontFamily = retroFont)
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Draw the rapid fire lines below the prompt as they generate
         items(transitionLines) { line ->
             Text(text = line, color = brightGreen, fontSize = 20.sp, fontFamily = retroFont)
             Spacer(modifier = Modifier.height(4.dp))
@@ -207,7 +219,7 @@ fun MainMenuScreen(onNavigateToSelector: () -> Unit, onNavigateToTimeFrame: () -
 }
 
 @Composable
-fun TimeFrameScreen(onBack: () -> Unit) {
+fun TimeFrameScreen(onBack: () -> Unit, isShaderEnabled: Boolean, onToggleShader: () -> Unit) {
     val retroFont = FontFamily(Font(R.font.vt323))
     val brightGreen = Color(0xFF4AF626)
     val darkBackground = Color(0xFF0F0F0F)
@@ -218,7 +230,7 @@ fun TimeFrameScreen(onBack: () -> Unit) {
 
     Column(modifier = Modifier.fillMaxSize().background(darkBackground).padding(24.dp)) {
         Text(text = "[ < GO BACK TO MENU ]", color = brightGreen, fontSize = 22.sp, fontFamily = retroFont, modifier = Modifier.clickable { onBack() }.padding(bottom = 24.dp, top = 24.dp))
-        Text("C:\\BOOTUP> TIME_CONFIG.exe", color = brightGreen, fontSize = 24.sp, fontFamily = retroFont, modifier = Modifier.padding(bottom = 32.dp))
+        Text("C:\\BOOTUP> SYS_CONFIG.exe", color = brightGreen, fontSize = 24.sp, fontFamily = retroFont, modifier = Modifier.padding(bottom = 32.dp))
 
         Text("SET BOOT SEQUENCE DURATION (SECONDS):", color = brightGreen, fontSize = 20.sp, fontFamily = retroFont)
         Spacer(modifier = Modifier.height(16.dp))
@@ -237,6 +249,25 @@ fun TimeFrameScreen(onBack: () -> Unit) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 cursorBrush = SolidColor(brightGreen),
                 modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        // --- NEW SHADER TOGGLE SETTING ---
+        Text("HARDWARE ACCELERATION:", color = brightGreen, fontSize = 20.sp, fontFamily = retroFont)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable { onToggleShader() }.padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("> ADVANCED CRT SHADER: ", color = brightGreen, fontSize = 24.sp, fontFamily = retroFont)
+            Text(
+                text = if (isShaderEnabled) "[ ENABLED ]" else "[ DISABLED ]",
+                color = brightGreen,
+                fontSize = 24.sp,
+                fontFamily = retroFont
             )
         }
 
@@ -285,6 +316,10 @@ class TargetManager(context: Context) {
 
     fun getBootDuration(): Long = prefs.getLong("boot_duration", 5000L)
     fun saveBootDuration(durationMs: Long) = prefs.edit().putLong("boot_duration", durationMs).apply()
+
+    // NEW METHODS TO TRACK SHADER PREFERENCE
+    fun isShaderEnabled(): Boolean = prefs.getBoolean("shader_enabled", true)
+    fun saveShaderEnabled(enabled: Boolean) = prefs.edit().putBoolean("shader_enabled", enabled).apply()
 }
 
 data class AppInfo(val name: String, val packageName: String)
@@ -400,7 +435,7 @@ fun BiosBootScreen(onBootComplete: () -> Unit) {
 }
 
 @Composable
-fun BootSequenceScreen(targetApp: String) {
+fun BootSequenceScreen(targetApp: String, targetAppPackage: String) {
     val retroFont = FontFamily(Font(R.font.vt323))
     val brightGreen = Color(0xFF4AF626)
     val dimGreen = Color(0xFF3B7342)
@@ -417,17 +452,92 @@ fun BootSequenceScreen(targetApp: String) {
         label = "LoadingAnimation"
     )
 
+    val phase1Text = remember {
+        listOf(
+            "Downloading more RAM...",
+            "Waking up the server hamsters...",
+            "Reticulating splines...",
+            "Initializing dummy variables...",
+            "Warming up cathode tubes...",
+            "Calibrating Pip-Boy 3000 interface...",
+            "Scanning for the 'Any' key... (Still missing)...",
+            "Waking up the band...",
+            "Opening the pod bay doors, HAL...",
+            "Spinning up the TARDIS engines...",
+            "Booting up the Batcomputer...",
+            "Linking the Master Emerald...",
+            "Inserting cartridge... blowing on it first...",
+        ).random()
+    }
+
+    val phase2Text = remember {
+        listOf(
+            "Hiding your browser history...",
+            "Applying percussive maintenance...",
+            "Feeding the mainframe gremlins...",
+            "Ignoring fatal system errors...",
+            "Defragging the cloud...",
+            "Charging Portal Gun fluid cells...",
+            "Realigning dilithium crystals...",
+            "Downloading Kung Fu...",
+            "Brewing Polyjuice Potion...",
+            "Smashing pots for rupees...",
+        ).random()
+    }
+
+    val phase3Text = remember {
+        listOf(
+            "Bypassing mainframe security...",
+            "Dividing by zero...",
+            "Hacking the Gibson...",
+            "Uploading Chicken_jockey.exe...",
+            "Rerouting power to life support...",
+            "Microwaving the microchips...",
+            "Synchronizing Animus memory stream...",
+            "Executing Order 66 on background processes...",
+            "Going plaid...",
+            "Opening a portal to the Upside Down...",
+            "Unlocking the Master Sword...",
+            "Crossing the streams...",
+        ).random()
+    }
+
+    val phase4Text = remember {
+        listOf(
+            "We're in.",
+            "Mainframe compromised.",
+            "Boot complete.",
+            "System hijacked.",
+            "Payload delivered.",
+            "Humanity Restored.",
+            "Task failed successfully.",
+            "Task completed. Go home, user, you're drunk.",
+            "System online. I'll be back.",
+            "Mischief managed.",
+            "It's dangerous to go alone. Take this.",
+            "Game over, man. Game over!",
+            "You are overencumbered and cannot run.",
+            "Flawless victory.",
+            "Fatality."
+        ).random()
+    }
+
     val terminalText = when {
-        animatedProgress < 0.3f -> "Initializing system..."
-        animatedProgress < 0.6f -> "Allocating memory..."
-        animatedProgress < 0.9f -> "Bypassing security..."
-        else -> "Boot complete."
+        animatedProgress < 0.3f -> phase1Text
+        animatedProgress < 0.6f -> phase2Text
+        animatedProgress < 0.9f -> phase3Text
+        else -> phase4Text
     }
 
     LaunchedEffect(Unit) {
         targetProgress = 1f
         delay(totalBootDurationMs)
         delay(500)
+
+        InterceptorService.activeApp = targetAppPackage
+        InterceptorService.interceptingApp = null
+        InterceptorService.transitionShieldEndTime = System.currentTimeMillis() + 2500L
+
         (context as? ComponentActivity)?.finish()
     }
 
@@ -442,8 +552,20 @@ fun BootSequenceScreen(targetApp: String) {
         Spacer(modifier = Modifier.weight(1f))
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                Text(terminalText, color = brightGreen, fontSize = 22.sp, fontFamily = retroFont)
-                Text("${(animatedProgress * 100).toInt()}%", color = brightGreen, fontSize = 22.sp, fontFamily = retroFont)
+                Text(
+                    text = terminalText,
+                    color = brightGreen,
+                    fontSize = 22.sp,
+                    fontFamily = retroFont,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Text(
+                    text = "${(animatedProgress * 100).toInt()}%",
+                    color = brightGreen,
+                    fontSize = 22.sp,
+                    fontFamily = retroFont
+                )
             }
             Spacer(modifier = Modifier.height(12.dp))
             LinearProgressIndicator(progress = { animatedProgress }, modifier = Modifier.fillMaxWidth().height(4.dp), color = brightGreen, trackColor = trackGreen)
@@ -457,4 +579,129 @@ fun BootSequenceScreen(targetApp: String) {
 @Composable
 fun BootUpTheme(content: @Composable () -> Unit) {
     androidx.compose.material3.MaterialTheme(content = content)
+}
+
+// --- NOW ACCEPTS THE TOGGLE STATE ---
+fun Modifier.crtEffect(isShaderEnabled: Boolean): Modifier = composed {
+    // Both constraints must be true to run the heavy math:
+    // Android 13+ AND the user hasn't toggled it off
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && isShaderEnabled) {
+
+        val infiniteTransition = rememberInfiniteTransition(label = "crtTime")
+        val time by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1000f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(100000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "time"
+        )
+
+        val SHADER_SRC = """
+            uniform shader composable;
+            uniform float2 resolution;
+            uniform float time; 
+            
+            vec2 warp(vec2 uv) {
+                vec2 coord = (uv - 0.5) * 2.0;
+                coord.x *= 1.0 + pow(abs(coord.y) / 8.0, 2.0);
+                coord.y *= 1.0 + pow(abs(coord.x) / 7.0, 2.0);
+                return (coord / 2.0) + 0.5;
+            }
+            
+            vec3 getBrightPixels(vec2 coord) {
+                vec3 color = composable.eval(coord).rgb;
+                return max(vec3(0.0), color - 0.05); 
+            }
+            
+            half4 main(float2 fragCoord) {
+                vec2 uv = fragCoord.xy / resolution.xy;
+                vec2 warpedUV = warp(uv);
+                
+                if (warpedUV.x < 0.0 || warpedUV.x > 1.0 || warpedUV.y < 0.0 || warpedUV.y > 1.0) {
+                    return half4(0.0, 0.0, 0.0, 1.0);
+                }
+                
+                vec2 pixelCoord = warpedUV * resolution.xy;
+                
+                // LAYER 1: CRISP BASE
+                vec3 cleanplate = composable.eval(pixelCoord).rgb;
+                
+                // LAYER 2: GOLDEN SPIRAL BLUR
+                vec3 bloom = vec3(0.0);
+                float totalWeight = 0.0;
+                
+                float maxRadius = 40.0; 
+                float goldenAngle = 2.3999632; 
+                float samples = 45.0; 
+                
+                for (float i = 0.0; i < 45.0; i++) {
+                    float r = maxRadius * sqrt(i / samples);
+                    float theta = i * goldenAngle;
+                    vec2 offset = vec2(cos(theta), sin(theta)) * r;
+                    float weight = 1.0 - (r / maxRadius);
+                    bloom += getBrightPixels(pixelCoord + offset) * weight;
+                    totalWeight += weight;
+                }
+                
+                bloom /= totalWeight;
+                
+                // OPACITY BLENDING
+                float brushOpacity = 0.40; 
+                vec3 finalColor = cleanplate + (bloom * 2.5 * brushOpacity);
+                
+                // POST-PROCESSING: CLASSIC TERMINAL
+                float staticLines = sin(fragCoord.y * 2.5) * 0.04;
+                float rollSpeed = 0.8;
+                float rollBar = sin((warpedUV.y * 15.0) - (time * rollSpeed)) * 0.06;
+                
+                finalColor *= (0.92 + staticLines + rollBar);
+                
+                float dx = 2.0 * warpedUV.x - 1.0;
+                float dy = 2.0 * warpedUV.y - 1.0;
+                float radius = sqrt(dx*dx + dy*dy);
+                float vignette = smoothstep(1.4, 0.7, radius);
+                finalColor *= vignette;
+                
+                return half4(finalColor, 1.0);
+            }
+        """
+
+        val shader = remember { RuntimeShader(SHADER_SRC) }
+
+        this.graphicsLayer {
+            shader.setFloatUniform("resolution", size.width, size.height)
+            shader.setFloatUniform("time", time)
+            renderEffect = RenderEffect.createRuntimeShaderEffect(shader, "composable").asComposeRenderEffect()
+            clip = true
+        }
+    } else {
+        // --- FALLBACK FOR OLDER ANDROID PHONES OR TOGGLED OFF ---
+        this.drawWithContent {
+            // Draw the actual UI first
+            drawContent()
+
+            // 1. Thinner, much more transparent scanlines (Alpha 0.10 instead of 0.25)
+            val scanlineColor = Color.Black.copy(alpha = 0.10f)
+            var y = 0f
+            while (y < size.height) {
+                drawLine(
+                    color = scanlineColor,
+                    start = Offset(0f, y),
+                    end = Offset(size.width, y),
+                    strokeWidth = 3f
+                )
+                y += 8f
+            }
+
+            // 2. A much softer vignette based on height so it doesn't crush the top/bottom
+            val vignette = Brush.radialGradient(
+                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.50f)),
+                center = Offset(size.width / 2f, size.height / 2f),
+                radius = size.height * 0.75f // Pushes the shadow far into the corners
+            )
+            drawRect(brush = vignette)
+        }
+    }
 }
