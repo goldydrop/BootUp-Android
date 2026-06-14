@@ -1,5 +1,8 @@
 package com.booty.bootup
 
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.composed
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
@@ -60,9 +63,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // --- NEW: HIDE SYSTEM BARS (FULLSCREEN IMMERSIVE MODE) ---
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        // ---------------------------------------------------------
+
         val interceptedPackage = intent.getStringExtra("INTERCEPTED_APP_PACKAGE")
 
         setContent {
+            // ... (The rest of your code stays exactly the same) ...
             BootUpTheme {
                 val context = LocalContext.current
                 val targetManager = remember { TargetManager(context) }
@@ -260,13 +271,20 @@ fun TimeFrameScreen(onBack: () -> Unit, isShaderEnabled: Boolean, onToggleShader
 
         Row(
             modifier = Modifier.fillMaxWidth().clickable { onToggleShader() }.padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("> ADVANCED CRT SHADER: ", color = brightGreen, fontSize = 24.sp, fontFamily = retroFont)
+            Text(
+                text = "> ADVANCED CRT SHADER: ",
+                color = brightGreen,
+                fontSize = 20.sp, // Slightly smaller
+                fontFamily = retroFont,
+                modifier = Modifier.weight(1f) // Lets it take up available space without pushing the toggle off-screen
+            )
             Text(
                 text = if (isShaderEnabled) "[ ENABLED ]" else "[ DISABLED ]",
                 color = brightGreen,
-                fontSize = 24.sp,
+                fontSize = 20.sp, // Slightly smaller
                 fontFamily = retroFont
             )
         }
